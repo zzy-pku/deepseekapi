@@ -11,4 +11,6 @@ requirements.txt：环境依赖
 文件名：knowledge_base.db
 有效期限：2025-07-27 01:06
 
-部署说明:将deepseekstreamfinal.py下载，将数据库下载并止于deeoseekstreamfinal的上一级目录中，新建环境并将requirements.txt中要求的依赖库导入，最后科学上网即可运行代码
+部署说明:1、将deepseekstreamfinal.py下载，将数据库下载并止于deeoseekstreamfinal的上一级目录中
+        2、新建环境并将requirements.txt中要求的依赖库导入，最后科学上网即可运行代码
+        3、创建.env文件在deepseekstreamfinal同目录下，并在文件中编写DEEPSEEK_API_KEY="你的deepseekapi密钥"
