@@ -244,7 +244,7 @@ def store_knowledge(content: str, metadata: Dict[str, Any] = None) -> int:
     )
     knowledge_db.commit()
     row_id = knowledge_cur.lastrowid
-    build_faiss_index()  # 新增知识后自动重建索引
+    
     return row_id
 
 
@@ -646,14 +646,14 @@ def create_web_interface():
                         value="deepseek-chat"
                     )
                     rag_checkbox = gr.Checkbox(label="开启RAG知识库检索", value=False)
-                    stream_btn = gr.Button("流式输出演示（打字机效果）")
+                    stream_btn = gr.Button("流式输出")
             with gr.Row():
-                gr.Markdown("### 流式输出（打字机效果，temperature=0.7）")
+                
                 stream_output = gr.Textbox(label="流式输出", lines=10)
 
         # 专家模式区
         with gr.Column(visible=False) as expert_mode_area:
-            gr.Markdown("## 高考志愿专家模式（多模态支持）")
+            gr.Markdown("## 高考志愿专家模式")
             with gr.Row():
                 with gr.Column():
                     gaokao_text_input = gr.Textbox(label="补充信息（可选）")
