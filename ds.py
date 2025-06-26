@@ -102,7 +102,8 @@ except Exception as e:
     print(f"向量模型加载失败: {e}")
     EMBEDDING_MODEL = None
 faiss_index = faiss.IndexFlatL2(EMBEDDING_MODEL.get_sentence_embedding_dimension())
-knowledge_db = sqlite3.connect("knowledge_base.db")
+KNOWLEDGE_DB_PATH = os.getenv("KNOWLEDGE_DB_PATH", "knowledge_base.db")
+knowledge_db = sqlite3.connect(KNOWLEDGE_DB_PATH)
 knowledge_cur = knowledge_db.cursor()
 knowledge_cur.execute('''
 CREATE TABLE IF NOT EXISTS documents (
