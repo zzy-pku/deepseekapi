@@ -27,6 +27,11 @@ from simpleeval import simple_eval
 from transformers import BlipProcessor, BlipForConditionalGeneration
 import whisper
 
+# ---------------------
+# 配置(初始化)
+# ---------------------
+
+
 # 配置DeepSeek API密钥（请在.env文件中设置DEEPSEEK_API_KEY）
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = "https://api.deepseek.com"
@@ -66,7 +71,7 @@ output_schema = {
     "required": ["response"]
 }
 
-# 1. 定义高考志愿输出的 JSON Schema（score_comparison 只要求 last_year_min）
+# 1. 定义高考志愿输出的 JSON Schema（score_comparison 只要求 22_year_min）
 GAOKAO_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -82,9 +87,10 @@ GAOKAO_OUTPUT_SCHEMA = {
                     "score_comparison": {
                         "type": "object",
                         "properties": {
-                            "last_year_min": {"type": "number"}
+                            "before_year_min": {"type": "number"},
+                            "before_year_rank": {"type": "integer"}
                         },
-                        "required": ["last_year_min"]
+                        "required": ["before_year_min", "before_year_rank"]
                     }
                 },
                 "required": ["university", "major", "probability", "score_comparison"]
@@ -137,47 +143,6 @@ def preprocess_input_text(text: str) -> str:
             return "检测到潜在的指令注入风险，输入已被阻断。"
     return text
 
-# ---------------------
-# 多模态数据处理
-# ---------------------
-def process_image(image: Image.Image) -> Dict[str, Any]:
-    """处理图像输入并转换为API所需格式"""
-    buffer = BytesIO()
-    image.save(buffer, format="JPEG")
-    image_bytes = buffer.getvalue()
-
-    # DeepSeek多模态API要求的图像格式
-    return {
-        "type": "image_url",
-        "image_url": {
-            "url": f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode()}"
-        }
-    }
-
-
-def process_audio(audio_file: str) -> Dict[str, Any]:
-    """将本地音频文件转为 base64 并按 DeepSeek API 格式返回"""
-    with open(audio_file, "rb") as f:
-        audio_bytes = f.read()
-    audio_base64 = base64.b64encode(audio_bytes).decode()
-    return {
-        "type": "audio_url",
-        "audio_url": {
-            "url": f"data:audio/wav;base64,{audio_base64}",
-            "content_type": "audio/wav"
-        }
-    }
-
-
-def generate_audio_response(text: str, model: str) -> bytes:
-    """生成语音输出"""
-    # 调用DeepSeek语音合成API
-    response = client.audio.speech.create(
-        model=model,
-        input=text,
-        voice="default"
-    )
-    return response.content
 
 
 # ---------------------
@@ -191,6 +156,7 @@ def validate_structure(output: str, schema: dict = GAOKAO_OUTPUT_SCHEMA) -> bool
     except Exception as e:
         print(f"结构化校验异常: {str(e)}")
         return False
+#结构化输出校验
 
 def enforce_structure(prompt: str, schema: dict = GAOKAO_OUTPUT_SCHEMA, max_retries: int = 3, user_id: str = "default_user") -> str:
     structured_prompt = f"""
@@ -203,7 +169,7 @@ def enforce_structure(prompt: str, schema: dict = GAOKAO_OUTPUT_SCHEMA, max_retr
     1. 必须包含candidate_analysis和recommendations
     2. 每个推荐必须包含university、major和probability
     3. probability只能是\"冲刺\"、\"稳妥\"或\"保底\"
-    4. 每个推荐必须包含score_comparison字段，内容包括last_year_min（去年最低分）
+    4. 每个推荐必须包含score_comparison字段，内容包括before_year_min（往年最低分）和before_year_rank（往年最低排名）
     5. 必须包含strategy_advice字段，内容为对考生的填报策略建议
     """
     for attempt in range(max_retries):
@@ -221,11 +187,11 @@ def enforce_structure(prompt: str, schema: dict = GAOKAO_OUTPUT_SCHEMA, max_retr
         之前的响应: {response["response"]}
         
         考生信息: {prompt}
-        4. 每个推荐必须包含score_comparison字段，内容包括last_year_min（去年最低分）
+        4. 每个推荐必须包含score_comparison字段，内容包括before_year_min（往年最低分）和before_year_rank（往年最低排名）
         5. 必须包含strategy_advice字段，内容为对考生的填报策略建议
         """
     return json.dumps({"error": "无法生成符合格式的响应", "raw_output": response["response"]})
-
+#要求结构化输出
 
 # ---------------------
 # RAG架构实现
@@ -234,7 +200,7 @@ def embed_text(text: str) -> np.ndarray:
     """将文本转换为向量表示"""
     embedding = EMBEDDING_MODEL.encode(text)
     return embedding.astype(np.float32)
-
+#词嵌入
 
 def store_knowledge(content: str, metadata: Dict[str, Any] = None) -> int:
     """存储知识到知识库"""
@@ -247,7 +213,7 @@ def store_knowledge(content: str, metadata: Dict[str, Any] = None) -> int:
     row_id = knowledge_cur.lastrowid
     
     return row_id
-
+#存储知识
 
 def build_faiss_index():
     """构建FAISS索引"""
@@ -262,7 +228,7 @@ def build_faiss_index():
         print("faiss_index.ntotal =", faiss_index.ntotal)
     else:
         print("没有可用的 embedding，未构建索引")
-
+#构建faiss索引
 
 def retrieve_knowledge(query: str, top_k: int = 100) -> List[str]:
     """通过FAISS检索相关知识"""
@@ -290,7 +256,7 @@ def retrieve_knowledge(query: str, top_k: int = 100) -> List[str]:
     conn.close()
     print(results)
     return results
-
+#检索知识
 
 # ---------------------
 # 记忆机制实现
@@ -355,7 +321,7 @@ class ConversationMemory:
         """更新用户画像"""
         self.user_profiles[user_id] = {**self.user_profiles.get(user_id, {}), **profile}
 
-
+#对话记忆
 memory = ConversationMemory()
 
 
@@ -448,6 +414,9 @@ def validate_input(input_data):
     except ValidationError as e:
         return False, str(e)
 
+# ---------------------
+# 多模态数据处理
+# ---------------------
 
 def image_to_caption_blip2(image: Image.Image) -> str:
     """
@@ -467,6 +436,11 @@ def audio_to_text_whisper(audio_file: str) -> str:
     return result["text"].strip() or "未能识别音频内容"
 
 
+
+# ---------------------
+# 生成响应（核心）
+# ---------------------
+
 def generate_response(input_data, user_id="default_user"):
     if isinstance(input_data.get("prompt"), str):
         input_data["prompt"] = preprocess_input_text(input_data["prompt"])
@@ -484,6 +458,7 @@ def generate_response(input_data, user_id="default_user"):
             system_prompt = f"""
             你是一个高考志愿填报专家，请根据以下考生信息生成推荐方案：
             - 分数: {input_data.get('score', '未提供')}
+            - 排名: {input_data.get('rank', '未提供')}
             - 省份: {input_data.get('province', '未提供')}
             - 科类: {input_data.get('subject_type', '未提供')}
             
@@ -494,7 +469,7 @@ def generate_response(input_data, user_id="default_user"):
             1. 必须包含candidate_analysis和recommendations
             2. 每个推荐必须包含university、major和probability
             3. probability只能是"冲刺"、"稳妥"或"保底"
-            4. 每个推荐必须包含score_comparison字段，内容包括last_year_min（去年最低分）
+            4. 每个推荐必须包含score_comparison字段，内容包括before_year_min（往年最低分）和before_year_rank（往年最低排名）
             5. 必须包含strategy_advice字段，内容为对考生的填报策略建议
             """
             messages.insert(0, {"role": "system", "content": system_prompt})
@@ -532,8 +507,8 @@ def generate_response(input_data, user_id="default_user"):
                 # 自动补充分差
                 if "recommendations" in output_data:
                     for rec in output_data["recommendations"]:
-                        if "score_comparison" in rec and "last_year_min" in rec["score_comparison"] and "score" in input_data:
-                            rec["score_comparison"]["score_difference"] = input_data["score"] - rec["score_comparison"]["last_year_min"]
+                        if "score_comparison" in rec and "before_year_min" in rec["score_comparison"] and "score" in input_data:
+                            rec["score_comparison"]["score_difference"] = input_data["score"] - rec["score_comparison"]["before_year_min"]
                 processed_content = json.dumps(output_data, ensure_ascii=False)
             except Exception as e:
                 print(f"高考志愿输出验证失败: {str(e)}")
@@ -588,8 +563,10 @@ def generate_response_stream(input_data, user_id="default_user"):
                 if related_knowledge:
                     knowledge_context = "相关知识库信息:\n" + "\n---\n".join(related_knowledge)
                     messages.append({"role": "system", "content": knowledge_context})
-            messages.append({"role": "user", "content": prompt})
-
+            # 在普通文本prompt后加一句话
+            prompt_with_reason = prompt + "\n适当给出考生分析及推荐原因。"
+            messages.append({"role": "user", "content": prompt_with_reason})
+        print(f"当前temperature参数值: {temperature}")
         response_stream = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -610,9 +587,7 @@ def generate_response_stream(input_data, user_id="default_user"):
     except Exception as e:
         yield f"流式响应错误: {str(e)}"
 
-
-# 在这里插入 generate_gaokao_recommendation
-
+# 高考志愿专家模式
 def generate_gaokao_recommendation(input_data, user_id="default_user"):
     required_fields = ["score", "province", "subject_type"]
     for field in required_fields:
@@ -622,9 +597,13 @@ def generate_gaokao_recommendation(input_data, user_id="default_user"):
     input_data["prompt"] = f"分数：{input_data['score']}，省份：{input_data['province']}，科类：{input_data['subject_type']}，兴趣：{','.join(input_data.get('interests', []))}"
     input_data["gaokao_mode"] = True
     input_data["use_rag"] = True  # 自动开启RAG
-    input_data["rag_keyword"] = f"{input_data['score']} {input_data['province']} {input_data['subject_type']} {' '.join(input_data.get('interests', []))}"
+    input_data["rag_keyword"] = f"{input_data['score']} {input_data['rank']} {input_data['province']} {input_data['subject_type']} {' '.join([i.strip() for i in input_data['interests'] if i.strip()])}"
     return generate_response(input_data, user_id)
 
+
+# ---------------------
+# 界面
+# ---------------------
 
 # 创建Gradio界面（输出调整为3个文本框）
 def create_web_interface():
@@ -646,6 +625,13 @@ def create_web_interface():
                         label="选择DeepSeek模型",
                         value="deepseek-chat"
                     )
+                    temperature_input = gr.Slider(
+                        label="Temperature（随机性）",
+                        minimum=0,
+                        maximum=2,
+                        value=0.7,
+                        step=0.01
+                    )
                     rag_checkbox = gr.Checkbox(label="开启RAG知识库检索", value=False)
                     stream_btn = gr.Button("流式输出")
             with gr.Row():
@@ -661,9 +647,17 @@ def create_web_interface():
                     gaokao_audio_input = gr.Audio(label="上传语音（可选）", type="filepath")
                     gaokao_image_input = gr.Image(label="上传图片（可选）", type="pil")
                     score_input = gr.Number(label="分数", precision=0)
+                    rank_input = gr.Number(label="排名", precision=0)
                     province_input = gr.Textbox(label="省份")
                     subject_type_input = gr.Dropdown(choices=["理科", "文科", "综合"], label="科类")
                     interests_input = gr.Textbox(label="兴趣（用逗号分隔）")
+                    gaokao_temperature_input = gr.Slider(
+                        label="Temperature（随机性）",
+                        minimum=0,
+                        maximum=2,
+                        value=0.7,
+                        step=0.01
+                    )
                     gaokao_smart_btn = gr.Button("智能推荐")
                 with gr.Column():
                     gaokao_json_output = gr.JSON(label="推荐结果（结构化JSON）")
@@ -672,11 +666,11 @@ def create_web_interface():
                     gaokao_stream_output = gr.Textbox(label="流式分析原文", lines=10)
             with gr.Row():
                 gaokao_rec_table = gr.Dataframe(
-                    headers=["院校", "专业", "录取概率", "去年最低分", "分差"],
+                    headers=["院校", "专业", "录取概率", "往年最低分", "往年最低排名", "分差"],
                     label="推荐院校专业列表"
                 )
 
-        def multimodal_stream(prompt, image, audio, model, use_rag):
+        def multimodal_stream(prompt, image, audio, model, temperature, use_rag):
             if image is not None:
                 input_prompt = image
             elif audio is not None:
@@ -686,14 +680,14 @@ def create_web_interface():
             input_data = {
                 "prompt": input_prompt,
                 "model": model,
-                "temperature": 0.7,
+                "temperature": temperature,
                 "use_rag": use_rag,
                 "rag_keyword": prompt
             }
             for chunk in generate_response_stream(input_data, user_id="default_user"):
                 yield chunk
 
-        def gaokao_smart_callback(text, audio, image, score, province, subject_type, interests):
+        def gaokao_smart_callback(text, audio, image, score, rank, province, subject_type, interests, temperature):
             import time
             # 0. 先清空所有输出区
             yield {
@@ -715,11 +709,17 @@ def create_web_interface():
                 prompt_parts.append(f"图片内容：{image_text}")
             prompt = " ".join(prompt_parts)
             input_data = {
-                "prompt": f"分数：{score}，省份：{province}，科类：{subject_type}，兴趣：{interests}。{prompt}。请推荐不超过10个院校。",
+                "prompt": f"分数：{score}，排名：{rank}，省份：{province}，科类：{subject_type}，兴趣：{interests}。{prompt}。请推荐不超过10个院校。",
                 "model": "deepseek-chat",
-                "temperature": 0.7,
+                "temperature": temperature,
                 "use_rag": True,
-                "rag_keyword": f"{score} {province} {subject_type} {interests}"
+                "gaokao_mode": True,
+                "score": score,
+                "rank": rank,
+                "province": province,
+                "subject_type": subject_type,
+                "interests": [i.strip() for i in interests.split(",") if i.strip()],
+                "rag_keyword": f"省份：{province} 选课要求：{subject_type} 最低分：{score} 最低分排位：{rank} 科类：{subject_type}"
             }
             # 2. 流式分析输出，保留秒数显示
             full_content = ""
@@ -740,8 +740,10 @@ def create_web_interface():
             struct_input_data = {
                 "prompt": struct_prompt,
                 "model": "deepseek-chat",
+                "temperature": temperature,
                 "gaokao_mode": True,
                 "score": score,
+                "rank": rank,
                 "province": province,
                 "subject_type": subject_type,
                 "interests": [i.strip() for i in interests.split(",") if i.strip()]
@@ -754,13 +756,15 @@ def create_web_interface():
                 strategy_advice = data.get("strategy_advice", "")
                 table_data = []
                 for rec in recommendations:
-                    last_year_min = rec.get("score_comparison", {}).get("last_year_min", "")
+                    year_min = rec.get("score_comparison", {}).get("before_year_min", "")
+                    year_rank = rec.get("score_comparison", {}).get("before_year_rank", "")
                     score_diff = rec.get("score_comparison", {}).get("score_difference", "")
                     table_data.append([
                         rec.get("university", ""),
                         rec.get("major", ""),
                         rec.get("probability", ""),
-                        last_year_min,
+                        year_min,
+                        year_rank,
                         score_diff
                     ])
                 analysis_text = candidate_analysis if isinstance(candidate_analysis, str) else json.dumps(candidate_analysis, ensure_ascii=False)
@@ -795,21 +799,21 @@ def create_web_interface():
 
         stream_btn.click(
             fn=multimodal_stream,
-            inputs=[prompt_input, image_input, audio_input, model_choice, rag_checkbox],
+            inputs=[prompt_input, image_input, audio_input, model_choice, temperature_input, rag_checkbox],
             outputs=stream_output,
             api_name=None,
             queue=True
         )
         gaokao_smart_btn.click(
             fn=gaokao_smart_callback,
-            inputs=[gaokao_text_input, gaokao_audio_input, gaokao_image_input, score_input, province_input, subject_type_input, interests_input],
+            inputs=[gaokao_text_input, gaokao_audio_input, gaokao_image_input, score_input, rank_input, province_input, subject_type_input, interests_input, gaokao_temperature_input],
             outputs=[gaokao_stream_output, gaokao_json_output, gaokao_analysis_output, gaokao_strategy_output, gaokao_rec_table]
         )
 
     return interface
 
 
-# 运行界面
+# main
 if __name__ == "__main__":
     build_faiss_index()
     interface = create_web_interface()
