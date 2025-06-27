@@ -15,7 +15,14 @@ def embed_text(text: str) -> np.ndarray:
     return embedding.astype(np.float32)
 
 def store_knowledge(content: str, metadata: dict, cur):
-    embedding = embed_text(content)
+    # 只用指定字段拼接
+    province = metadata.get("省份", "")
+    xk_info = metadata.get("选课要求信息", "")
+    min_score = str(metadata.get("最低分", ""))
+    min_rank = str(metadata.get("最低分排位", ""))
+    subject_type = metadata.get("科类", "")
+    index_text = f"省份:{province} 选课要求:{xk_info} 最低分:{min_score} 最低分排位:{min_rank} 科类:{subject_type}"
+    embedding = embed_text(index_text)
     cur.execute(
         "INSERT INTO documents (content, metadata, embedding) VALUES (?, ?, ?)",
         (content, json.dumps(metadata, ensure_ascii=False), embedding.tobytes())
