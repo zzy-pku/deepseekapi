@@ -15,3 +15,4 @@ requirements.txt：环境依赖
 数据库下载链接：https://disk.pku.edu.cn/link/AAB177D0A10B15434CBF204B94933FC61A
 文件名：knowledge_base.db
 有效期限：2025-07-27 01:06
+注：目前数据库仅支持2020-2022年间广东、北京、上海等地的信息
